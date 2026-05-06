@@ -27,7 +27,7 @@ func getLinesChannel(f io.ReadCloser) <-chan string {
 			}
 
 			if len(parts) > 1 {
-				ch <- string(currentLineBuffer) + "\n"
+				ch <- string(currentLineBuffer)
 				currentLineBuffer = make([]byte, len(parts[1]))
 				copy(currentLineBuffer, parts[1])
 			}
@@ -55,7 +55,7 @@ func main() {
 	ch := getLinesChannel(f)
 
 	for line := range ch {
-		fmt.Printf("read: %s", line)
+		fmt.Printf("read: %s\n", line)
 	}
 
 	defer f.Close()
