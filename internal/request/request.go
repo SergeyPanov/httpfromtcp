@@ -1,6 +1,7 @@
 package request
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 type Request struct {
 	RequestLine RequestLine `validate:"required"`
+	State       ParserState
 }
 
 type RequestLine struct {
@@ -18,44 +20,102 @@ type RequestLine struct {
 	HttpVersion   string `validate:"required,eq=1.1"`
 }
 
+type ParserState int
+
+const (
+	initialized ParserState = iota
+	done
+)
+
+const bufferSize = 8
+
 func RequestFromReader(reader io.Reader) (Request, error) {
-	requestLine, err := parseRequestLine(reader)
+	buf := make([]byte, bufferSize)
+	readToIndex := 0
+
+	for {
+		n, err := reader.Read(buf[readToIndex:])
+		readToIndex += n
+
+		if err != nil && err != io.EOF {
+			return Request{}, nil
+		}
+
+		if readToIndex >= len(buf) {
+			dbuf := make([]byte, 2*len(buf))
+			copy(dbuf, buf)
+			buf = dbuf
+		}
+
+		if err == io.EOF {
+			break
+		}
+	}
+
+	request := Request{
+		State: initialized,
+	}
+
+	n, err := request.parse(buf)
 
 	if err != nil {
 		return Request{}, err
 	}
-	req := Request{
-		RequestLine: *requestLine,
-	}
-	validate := validator.New(validator.WithRequiredStructEnabled())
-	err = validate.Struct(req)
+	tmpBuf := make([]byte, len(buf)-n)
+	copy(tmpBuf, buf[n:])
+	buf = tmpBuf
 
-	return req, err
+	validate := validator.New(validator.WithRequiredStructEnabled())
+	err = validate.Struct(request)
+
+	return request, err
 }
 
-func parseRequestLine(reader io.Reader) (*RequestLine, error) {
-	content, err := io.ReadAll(reader)
+func (r *Request) parse(data []byte) (int, error) {
+	clrf := []byte("\r\n")
 
-	if err != nil {
-		return nil, err
+	switch r.State {
+	case done:
+		return 0, errors.New("error: trying to read data in a done state")
+	case initialized:
+		consumed, err := parseRequestLine(data)
+		if err != nil {
+			return 0, err
+		}
+
+		if consumed == 0 {
+			return 0, nil
+		}
+
+		requestLineBytes := data[:consumed-len(clrf)]
+		parts := bytes.Split(requestLineBytes, []byte(" "))
+
+		if len(parts) != 3 {
+			return 0, errors.New("error: invalid request line")
+		}
+
+		r.RequestLine = RequestLine{
+			Method:        string(parts[0]),
+			RequestTarget: string(parts[1]),
+			HttpVersion:   strings.Split(string(parts[2]), "/")[1],
+		}
+
+		r.State = done
+
+		return consumed, nil
+	default:
+		return 0, errors.New("error: unknown state")
+
+	}
+}
+
+func parseRequestLine(data []byte) (int, error) {
+	clrf := []byte("\r\n")
+	idx := bytes.Index(data, clrf)
+	if idx < 0 {
+		return 0, nil
 	}
 
-	parts := strings.Split(string(content), "\r\n")
-
-	if len(parts) <= 0 {
-		return nil, errors.New("no request line in the request")
-	}
-
-	requestLineParts := strings.Split(parts[0], " ")
-
-	if len(requestLineParts) != 3 {
-		return nil, errors.New("invalid request line; request-line  = method SP request-target SP HTTP-version")
-	}
-
-	return &RequestLine{
-		Method:        requestLineParts[0],
-		RequestTarget: requestLineParts[1],
-		HttpVersion:   strings.Split(requestLineParts[2], "/")[1],
-	}, nil
+	return idx + len(clrf), nil
 
 }
