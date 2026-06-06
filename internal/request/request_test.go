@@ -29,7 +29,7 @@ func (cr *chunkReader) Read(p []byte) (n int, err error) {
 
 func TestGoodGETRequestLine(t *testing.T) {
 	reader := &chunkReader{
-		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\nContent-Length: 13\r\n\r\nhello world!\n",
 		numBytesPerRead: 3,
 	}
 	r, err := RequestFromReader(reader)
@@ -41,6 +41,7 @@ func TestGoodGETRequestLine(t *testing.T) {
 	assert.Equal(t, "localhost:42069", r.Headers["host"])
 	assert.Equal(t, "curl/7.81.0", r.Headers["user-agent"])
 	assert.Equal(t, "*/*", r.Headers["accept"])
+	assert.Equal(t, "hello world!\n", string(r.Body))
 }
 
 func TestGoodGETRequestLineWithPath(t *testing.T) {
@@ -101,4 +102,42 @@ func TestDuplicateHeader(t *testing.T) {
 	r, err := RequestFromReader(reader)
 	require.NoError(t, err)
 	require.Equal(t, "localhost:42069, localhost:12345", r.Headers["host"])
+}
+
+func TestEmptyBody(t *testing.T) {
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+	r, err := RequestFromReader(reader)
+	require.NoError(t, err)
+	require.Equal(t, "", string(r.Body))
+}
+
+func TestEmptyBodyNoContentLength(t *testing.T) {
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+	r, err := RequestFromReader(reader)
+	require.NoError(t, err)
+	require.Equal(t, "", string(r.Body))
+}
+
+func TestBodyShorterThanContentLength(t *testing.T) {
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\nContent-Length: 5\r\n\r\nHey",
+		numBytesPerRead: 3,
+	}
+	_, err := RequestFromReader(reader)
+	require.Error(t, err)
+}
+
+func TestNoContentLength(t *testing.T) {
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\n\r\nHey",
+		numBytesPerRead: 3,
+	}
+	_, err := RequestFromReader(reader)
+	require.NoError(t, err)
 }

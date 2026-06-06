@@ -67,6 +67,12 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	return consumed, false, nil
 }
 
+func (h Headers) Get(key string) (string, bool) {
+	key = strings.ToLower(key)
+	v, ok := h[key]
+	return v, ok
+}
+
 func isFinished(data string) bool {
 	return len(data) >= 2 && data[0] == CR && data[1] == LF
 }

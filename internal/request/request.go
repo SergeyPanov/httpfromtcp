@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/SergeyPanov/httpfromtcp/internal/headers"
@@ -13,6 +14,7 @@ import (
 type Request struct {
 	RequestLine RequestLine `validate:"required"`
 	Headers     headers.Headers
+	Body        []byte
 	State       ParserState
 }
 
@@ -27,6 +29,7 @@ type ParserState int
 const (
 	initialized ParserState = iota
 	requestStateParsingHeaders
+	requestStateParsingBody
 	done
 )
 
@@ -82,6 +85,7 @@ func (r *Request) parse(data []byte) (int, error) {
 	switch r.State {
 	case done:
 		return 0, errors.New("error: trying to read data in a done state")
+
 	case initialized:
 		consumed, err := parseRequestLine(data)
 		if err != nil {
@@ -108,6 +112,7 @@ func (r *Request) parse(data []byte) (int, error) {
 		r.State = requestStateParsingHeaders
 
 		return consumed, nil
+
 	case requestStateParsingHeaders:
 		headers := headers.NewHeaders()
 		consumed, doneParsing, err := headers.Parse(data)
@@ -117,13 +122,37 @@ func (r *Request) parse(data []byte) (int, error) {
 		}
 
 		if doneParsing {
-			r.State = done
+			r.State = requestStateParsingBody
 			return consumed, nil
 		}
 
 		r.Headers = headers
 
 		return consumed, nil
+
+	case requestStateParsingBody:
+		trimmed := bytes.TrimRight(data, "\x00")
+
+		contentLength, ok := r.Headers.Get("Content-Length")
+		r.State = done
+
+		if !ok {
+			return 0, nil
+		}
+
+		length, err := strconv.Atoi(contentLength)
+		if err != nil {
+			return 0, err
+		}
+
+		if len(trimmed) != length+len(clrf) {
+			return 0, errors.New("the body length doesn't match to the Content-Length")
+		}
+
+		r.Body = trimmed[len(clrf):]
+
+		return len(data), nil
+
 	default:
 		return 0, errors.New("error: unknown state")
 

@@ -25,6 +25,7 @@ func main() {
 		req, err := request.RequestFromReader(conn)
 
 		fmt.Printf("%+v\n", req.RequestLine)
+		fmt.Printf("%+v\n", req.Headers)
 
 	}
 
