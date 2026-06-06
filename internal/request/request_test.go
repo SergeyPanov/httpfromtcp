@@ -82,3 +82,23 @@ func TestMalformedHeader(t *testing.T) {
 	_, err := RequestFromReader(reader)
 	require.Error(t, err)
 }
+
+func TestEmptyHeader(t *testing.T) {
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+	r, err := RequestFromReader(reader)
+	require.NoError(t, err)
+	require.Nil(t, r.Headers)
+}
+
+func TestDuplicateHeader(t *testing.T) {
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nhost: localhost:12345\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+	r, err := RequestFromReader(reader)
+	require.NoError(t, err)
+	require.Equal(t, "localhost:42069, localhost:12345", r.Headers["host"])
+}
