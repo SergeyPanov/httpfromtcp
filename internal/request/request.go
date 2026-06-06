@@ -6,11 +6,13 @@ import (
 	"io"
 	"strings"
 
+	"github.com/SergeyPanov/httpfromtcp/internal/headers"
 	"github.com/go-playground/validator/v10"
 )
 
 type Request struct {
 	RequestLine RequestLine `validate:"required"`
+	Headers     headers.Headers
 	State       ParserState
 }
 
@@ -24,6 +26,7 @@ type ParserState int
 
 const (
 	initialized ParserState = iota
+	requestStateParsingHeaders
 	done
 )
 
@@ -56,17 +59,19 @@ func RequestFromReader(reader io.Reader) (Request, error) {
 		State: initialized,
 	}
 
-	n, err := request.parse(buf)
+	for request.State != done {
+		n, err := request.parse(buf)
 
-	if err != nil {
-		return Request{}, err
+		if err != nil {
+			return Request{}, err
+		}
+		tmpBuf := make([]byte, len(buf)-n)
+		copy(tmpBuf, buf[n:])
+		buf = tmpBuf
 	}
-	tmpBuf := make([]byte, len(buf)-n)
-	copy(tmpBuf, buf[n:])
-	buf = tmpBuf
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
-	err = validate.Struct(request)
+	err := validate.Struct(request)
 
 	return request, err
 }
@@ -100,7 +105,23 @@ func (r *Request) parse(data []byte) (int, error) {
 			HttpVersion:   strings.Split(string(parts[2]), "/")[1],
 		}
 
-		r.State = done
+		r.State = requestStateParsingHeaders
+
+		return consumed, nil
+	case requestStateParsingHeaders:
+		headers := headers.NewHeaders()
+		consumed, doneParsing, err := headers.Parse(data)
+
+		if err != nil {
+			return consumed, err
+		}
+
+		if doneParsing {
+			r.State = done
+			return consumed, nil
+		}
+
+		r.Headers = headers
 
 		return consumed, nil
 	default:

@@ -38,6 +38,9 @@ func TestGoodGETRequestLine(t *testing.T) {
 	assert.Equal(t, "GET", r.RequestLine.Method)
 	assert.Equal(t, "/", r.RequestLine.RequestTarget)
 	assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
+	assert.Equal(t, "localhost:42069", r.Headers["host"])
+	assert.Equal(t, "curl/7.81.0", r.Headers["user-agent"])
+	assert.Equal(t, "*/*", r.Headers["accept"])
 }
 
 func TestGoodGETRequestLineWithPath(t *testing.T) {
@@ -65,6 +68,15 @@ func TestInvalidNumberOfPartsInRequestLine(t *testing.T) {
 func TestInvalidMethod(t *testing.T) {
 	reader := &chunkReader{
 		data:            "DOP /coffee HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+		numBytesPerRead: 3,
+	}
+	_, err := RequestFromReader(reader)
+	require.Error(t, err)
+}
+
+func TestMalformedHeader(t *testing.T) {
+	reader := &chunkReader{
+		data:            "GET / HTTP/1.1\r\nHost localhost:42069\r\n\r\n",
 		numBytesPerRead: 3,
 	}
 	_, err := RequestFromReader(reader)

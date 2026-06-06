@@ -87,7 +87,7 @@ func extractKey(data string) (string, int, error) {
 			key += string(ch)
 
 		} else {
-			return "", -1, fmt.Errorf("invalid character: %c", ch)
+			return "", -1, fmt.Errorf("invalid character in the header key: %c", ch)
 		}
 	}
 
