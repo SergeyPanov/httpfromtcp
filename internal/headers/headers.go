@@ -28,35 +28,47 @@ func NewHeaders() Headers {
 }
 
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
-	if len(data) >= 2 && data[0] == CR && data[1] == LF {
-		return 2, true, nil
+	if isFinished(string(data)) {
+		return 0, true, nil
 	}
 	done = false
 	consumed := 0
 
-	key, consumedK, err := extractKey(string(data[consumed:]))
-	if err != nil {
-		return 0, false, err
-	}
-	// len(field-name) + len (":")
-	consumed += consumedK + 1
+	for consumed <= len(data) {
+		if isFinished(string(data[consumed:])) {
+			return consumed, false, nil
+		}
 
-	val, consumedV, err := extractValue(string(data[consumed:]))
-	if err != nil {
-		return 0, false, err
-	}
+		key, consumedK, err := extractKey(string(data[consumed:]))
+		if err != nil {
+			return 0, false, err
+		}
+		key = strings.ToLower(key)
 
-	consumed += consumedV
+		// len(field-name) + len (":")
+		consumed += consumedK + 1
 
-	v, ok := h[key]
+		val, consumedV, err := extractValue(string(data[consumed:]))
+		if err != nil {
+			return 0, false, err
+		}
 
-	if !ok {
-		h[key] = val
-	} else {
-		h[key] = strings.Join([]string{v, val}, ",")
+		consumed += consumedV
+
+		v, ok := h[key]
+
+		if !ok {
+			h[key] = val
+		} else {
+			h[key] = strings.Join([]string{v, val}, ", ")
+		}
 	}
 
 	return consumed, false, nil
+}
+
+func isFinished(data string) bool {
+	return len(data) >= 2 && data[0] == CR && data[1] == LF
 }
 
 func extractKey(data string) (string, int, error) {
@@ -75,7 +87,7 @@ func extractKey(data string) (string, int, error) {
 			key += string(ch)
 
 		} else {
-			return "", -1, fmt.Errorf("invalid character: %ch", ch)
+			return "", -1, fmt.Errorf("invalid character: %c", ch)
 		}
 	}
 
