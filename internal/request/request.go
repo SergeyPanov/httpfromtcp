@@ -39,38 +39,49 @@ func RequestFromReader(reader io.Reader) (Request, error) {
 	buf := make([]byte, bufferSize)
 	readToIndex := 0
 
-	for {
-		n, err := reader.Read(buf[readToIndex:])
-		readToIndex += n
+	request := Request{
+		State:   initialized,
+		Headers: headers.NewHeaders(),
+	}
 
-		if err != nil && err != io.EOF {
-			return Request{}, nil
-		}
-
+	for request.State != done {
 		if readToIndex >= len(buf) {
 			dbuf := make([]byte, 2*len(buf))
 			copy(dbuf, buf)
 			buf = dbuf
 		}
 
-		if err == io.EOF {
-			break
-		}
-	}
+		n, err := reader.Read(buf[readToIndex:])
+		readToIndex += n
 
-	request := Request{
-		State: initialized,
-	}
-
-	for request.State != done {
-		n, err := request.parse(buf)
-
-		if err != nil {
+		if err != nil && err != io.EOF {
 			return Request{}, err
 		}
-		tmpBuf := make([]byte, len(buf)-n)
-		copy(tmpBuf, buf[n:])
-		buf = tmpBuf
+
+		// Parse as much as possible from what we have so far.
+		for request.State != done {
+			consumed, parseErr := request.parse(buf[:readToIndex])
+			if parseErr != nil {
+				return Request{}, parseErr
+			}
+
+			if consumed == 0 {
+				// Need more data.
+				break
+			}
+
+			copy(buf, buf[consumed:readToIndex])
+			readToIndex -= consumed
+		}
+
+		if err == io.EOF && request.State != done {
+			return Request{}, errors.New("unexpected EOF: incomplete request")
+		}
+	}
+
+	// Report no headers as a nil map rather than an empty one.
+	if len(request.Headers) == 0 {
+		request.Headers = nil
 	}
 
 	validate := validator.New(validator.WithRequiredStructEnabled())
@@ -114,8 +125,7 @@ func (r *Request) parse(data []byte) (int, error) {
 		return consumed, nil
 
 	case requestStateParsingHeaders:
-		headers := headers.NewHeaders()
-		consumed, doneParsing, err := headers.Parse(data)
+		consumed, doneParsing, err := r.Headers.Parse(data)
 
 		if err != nil {
 			return consumed, err
@@ -123,20 +133,16 @@ func (r *Request) parse(data []byte) (int, error) {
 
 		if doneParsing {
 			r.State = requestStateParsingBody
-			return consumed, nil
 		}
-
-		r.Headers = headers
 
 		return consumed, nil
 
 	case requestStateParsingBody:
-		trimmed := bytes.TrimRight(data, "\x00")
-
 		contentLength, ok := r.Headers.Get("Content-Length")
-		r.State = done
 
+		// No body expected.
 		if !ok {
+			r.State = done
 			return 0, nil
 		}
 
@@ -145,13 +151,15 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, err
 		}
 
-		if len(trimmed) != length+len(clrf) {
-			return 0, errors.New("the body length doesn't match to the Content-Length")
+		// Wait until the full body has arrived.
+		if len(data) < length {
+			return 0, nil
 		}
 
-		r.Body = trimmed[len(clrf):]
+		r.Body = data[:length]
+		r.State = done
 
-		return len(data), nil
+		return length, nil
 
 	default:
 		return 0, errors.New("error: unknown state")

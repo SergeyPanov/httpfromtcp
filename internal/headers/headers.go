@@ -28,43 +28,46 @@ func NewHeaders() Headers {
 }
 
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
+	// Not enough data yet to tell whether this is the terminating CRLF.
+	if len(data) < 2 {
+		return 0, false, nil
+	}
+
+	// A leading CRLF marks the end of the headers section.
 	if isFinished(string(data)) {
-		return 0, true, nil
-	}
-	done = false
-	consumed := 0
-
-	for consumed <= len(data) {
-		if isFinished(string(data[consumed:])) {
-			return consumed, false, nil
-		}
-
-		key, consumedK, err := extractKey(string(data[consumed:]))
-		if err != nil {
-			return 0, false, err
-		}
-		key = strings.ToLower(key)
-
-		// len(field-name) + len (":")
-		consumed += consumedK + 1
-
-		val, consumedV, err := extractValue(string(data[consumed:]))
-		if err != nil {
-			return 0, false, err
-		}
-
-		consumed += consumedV
-
-		v, ok := h[key]
-
-		if !ok {
-			h[key] = val
-		} else {
-			h[key] = strings.Join([]string{v, val}, ", ")
-		}
+		return 2, true, nil
 	}
 
-	return consumed, false, nil
+	// We need a complete header line (terminated by CRLF) before parsing.
+	idx := bytes.Index(data, []byte{CR, LF})
+	if idx < 0 {
+		// Incomplete line: ask the caller for more data.
+		return 0, false, nil
+	}
+
+	// The line plus its trailing CRLF, which extractValue expects.
+	line := data[:idx+2]
+
+	key, consumedK, err := extractKey(string(line))
+	if err != nil {
+		return 0, false, err
+	}
+	key = strings.ToLower(key)
+
+	// field-name + ":"
+	val, consumedV, err := extractValue(string(line[consumedK+1:]))
+	if err != nil {
+		return 0, false, err
+	}
+
+	v, ok := h[key]
+	if !ok {
+		h[key] = val
+	} else {
+		h[key] = strings.Join([]string{v, val}, ", ")
+	}
+
+	return consumedK + 1 + consumedV, false, nil
 }
 
 func (h Headers) Get(key string) (string, bool) {
